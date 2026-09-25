@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Amazon India Sales Dashboard</title>
+  <meta name="description" content="Dashboard penjualan Amazon India (Apr-Jun 2022): tren, kategori, wilayah, uji statistik, dan estimasi nilai transaksi dengan Random Forest.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='4' y='16' width='5' height='12' rx='1.5' fill='%232a78d6'/><rect x='13.5' y='9' width='5' height='19' rx='1.5' fill='%232a78d6'/><rect x='23' y='4' width='5' height='24' rx='1.5' fill='%23eb6834'/></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <div>
+        <h1>Amazon India Sales</h1>
+        <p class="sub" id="period">Memuat data...</p>
+      </div>
+      <button class="theme-btn" id="themeBtn" type="button" aria-label="Ganti tema terang/gelap">Tema</button>
+    </div>
+    <nav class="wrap tabs" role="tablist">
+      <button role="tab" class="tab" aria-selected="true" data-tab="sales">Penjualan</button>
+      <button role="tab" class="tab" aria-selected="false" data-tab="price">Harga &amp; uji statistik</button>
+      <button role="tab" class="tab" aria-selected="false" data-tab="model">Model &amp; estimasi</button>
+    </nav>
+  </header>
+
+  <main class="wrap">
+    <!-- ───────────────────────── Penjualan ───────────────────────── -->
+    <section id="tab-sales" class="panel" role="tabpanel">
+      <div class="filters" role="group" aria-label="Filter">
+        <label>Bulan
+          <select id="fMonth">
+            <option value="all">Semua (31 Mar - 29 Jun)</option>
+            <option value="4">April</option>
+            <option value="5">Mei</option>
+            <option value="6">Juni</option>
+          </select>
+        </label>
+        <label>Kategori <select id="fCategory"><option value="all">Semua kategori</option></select></label>
+        <label>Fulfilment
+          <select id="fFulfil">
+            <option value="all">Semua</option>
+            <option value="Amazon">Amazon (FBA)</option>
+            <option value="Merchant">Merchant (Easy Ship)</option>
+          </select>
+        </label>
+        <label>Segmen
+          <select id="fB2B">
+            <option value="all">B2B + B2C</option>
+            <option value="0">B2C</option>
+            <option value="1">B2B</option>
+          </select>
+        </label>
+        <button type="button" class="reset" id="fReset">Reset</button>
+      </div>
+
+      <div class="kpis">
+        <div class="kpi hero"><span class="kpi-label">Pendapatan (order berhasil)</span><span class="kpi-value" id="kRevenue">-</span></div>
+        <div class="kpi"><span class="kpi-label">Order berhasil</span><span class="kpi-value" id="kOrders">-</span></div>
+        <div class="kpi"><span class="kpi-label">Rata-rata nilai order</span><span class="kpi-value" id="kAov">-</span></div>
+        <div class="kpi"><span class="kpi-label">Unit terjual</span><span class="kpi-value" id="kUnits">-</span></div>
+        <div class="kpi"><span class="kpi-label">Order gagal / batal / retur</span><span class="kpi-value" id="kFail">-</span><span class="kpi-note" id="kFailN"></span></div>
+      </div>
+
+      <div class="grid">
+        <article class="card span-2">
+          <h2>Pendapatan harian</h2>
+          <p class="card-sub">INR, hanya order yang berhasil dikirim</p>
+          <div class="chart tall"><canvas id="cDaily"></canvas></div>
+          <details class="tbl" data-for="cDaily"><summary>Lihat tabel</summary><div></div></details>
+        </article>
+        <article class="card">
+          <h2>Pendapatan per kategori</h2>
+          <p class="card-sub">Set dan kurta mendominasi pendapatan</p>
+          <div class="chart"><canvas id="cCategory"></canvas></div>
+          <details class="tbl" data-for="cCategory"><summary>Lihat tabel</summary><div></div></details>
+        </article>
+        <article class="card">
+          <h2>Tingkat order gagal per kategori</h2>
+          <p class="card-sub">% order batal, retur, hilang, atau tidak terkirim</p>
+          <div class="chart"><canvas id="cFailCat"></canvas></div>
+          <details class="tbl" data-for="cFailCat"><summary>Lihat tabel</summary><div></div></details>
+        </article>
+        <article class="card">
+          <h2>Unit terjual per ukuran</h2>
+          <p class="card-sub">M, L, dan XL paling laku</p>
+          <div class="chart"><canvas id="cSize"></canvas></div>
+          <details class="tbl" data-for="cSize"><summary>Lihat tabel</summary><div></div></details>
+        </article>
+        <article class="card">
+          <h2>10 negara bagian teratas</h2>
+          <p class="card-sub">Pendapatan menurut negara bagian tujuan</p>
+          <div class="chart"><canvas id="cState"></canvas></div>
+          <details class="tbl" data-for="cState"><summary>Lihat tabel</summary><div></div></details>
+        </article>
+      </div>
+    </section>
+
+    <!-- ───────────────────── Harga & uji statistik ───────────────────── -->
+    <section id="tab-price" class="panel" role="tabpanel" hidden>
+      <p class="scope-note">Bagian ini memakai seluruh data order berhasil (<span id="nClean"></span> transaksi) dan tidak dipengaruhi filter.</p>
+      <div class="grid">
+        <article class="card span-2">
+          <h2>Median nilai transaksi per kategori &amp; ukuran</h2>
+          <p class="card-sub">INR. Warna lebih gelap = lebih mahal. Sel kosong = tidak ada transaksi.</p>
+          <div id="heatmap" class="heatmap" role="table" aria-label="Median amount per kategori dan ukuran"></div>
+          <div class="heat-legend"><span id="hMin"></span><span class="heat-ramp"></span><span id="hMax"></span></div>
+        </article>
+        <article class="card span-2">
+          <h2>Rentang harga per kategori</h2>
+          <p class="card-sub">Batang = kuartil 1 sampai kuartil 3, titik = median, garis tipis = persentil 5 sampai 95</p>
+          <div class="chart tall"><canvas id="cBox"></canvas></div>
+          <details class="tbl" data-for="cBox"><summary>Lihat tabel</summary><div></div></details>
+        </article>
+      </div>
+      <h2 class="section-title">Uji hipotesis</h2>
+      <div class="grid tests" id="tests"></div>
+    </section>
+
+    <!-- ───────────────────────── Model ───────────────────────── -->
+    <section id="tab-model" class="panel" role="tabpanel" hidden>
+      <div class="grid">
+        <article class="card span-2 estimator">
+          <h2>Estimasi nilai transaksi</h2>
+          <p class="card-sub">Prediksi dari Random Forest hasil tuning (fitur sama persis dengan notebook). Dihitung di muka untuk semua kombinasi, jadi jalan tanpa server.</p>
+          <form id="estForm" class="est-form"></form>
+          <div class="est-out">
+            <span class="kpi-label">Perkiraan nilai transaksi</span>
+            <span class="est-value" id="estValue">-</span>
+            <span class="est-range" id="estRange"></span>
+            <span class="est-warn" id="estWarn" hidden></span>
+          </div>
+        </article>
+
+        <article class="card span-2">
+          <h2>Performa model (test set 20%)</h2>
+          <div class="metric-table" id="metricTable"></div>
+          <div class="callout" id="verdict"></div>
+        </article>
+
+        <article class="card">
+          <h2>R² cross-validation per fold</h2>
+          <p class="card-sub">5-fold pada data train. Tuning hanya menambah sekitar 0,002.</p>
+          <div class="chart"><canvas id="cCV"></canvas></div>
+          <details class="tbl" data-for="cCV"><summary>Lihat tabel</summary><div></div></details>
+        </article>
+        <article class="card">
+          <h2>Feature importance (tuned)</h2>
+          <p class="card-sub">Kategori produk menjelaskan hampir seluruh prediksi</p>
+          <div class="chart"><canvas id="cImp"></canvas></div>
+          <details class="tbl" data-for="cImp"><summary>Lihat tabel</summary><div></div></details>
+        </article>
+        <article class="card span-2">
+          <h2>Aktual vs prediksi per rentang harga</h2>
+          <p class="card-sub">Rata-rata INR di test set. Model menaikkan order murah dan sangat menurunkan order mahal (regresi ke rata-rata).</p>
+          <div class="chart"><canvas id="cResid"></canvas></div>
+          <details class="tbl" data-for="cResid"><summary>Lihat tabel</summary><div></div></details>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap foot">
+    Data: Amazon Sale Report (Kaggle), 31 Mar - 29 Jun 2022. Analisis &amp; model: <code>DataAnalytics_Fixed.ipynb</code>.
+    Data dashboard dibangun ulang dengan <code>python dashboard/scripts/build_data.py</code>.
+  </footer>
+
+  <div id="tooltip" class="tooltip" role="status" hidden></div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
